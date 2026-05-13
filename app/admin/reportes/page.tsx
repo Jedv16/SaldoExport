@@ -8,7 +8,7 @@ type ReportRow = {
   anio: number;
   usuario_id: string | null;
   created_at: string | null;
-  empresas?: { razon_social?: string | null } | null;
+  empresas?: { razon_social?: string | null }[] | null;
 };
 
 type UserRow = {
@@ -129,7 +129,7 @@ export default function AdminReportesPage() {
           )}
           {reports.map((row) => (
             <div key={row.id} className="grid grid-cols-4 gap-2 border-t border-[#edf1f7] px-4 py-3 text-sm">
-              <span className="font-semibold text-[#0b1f3a]">{row.empresas?.razon_social ?? 'Periodo fiscal'}</span>
+              <span className="font-semibold text-[#0b1f3a]">{row.empresas?.[0]?.razon_social ?? 'Periodo fiscal'}</span>
               <span className="text-[#465166]">
                 {usersById[row.usuario_id ?? '']?.nombre_completo || usersById[row.usuario_id ?? '']?.email || 'Sin usuario'}
               </span>
