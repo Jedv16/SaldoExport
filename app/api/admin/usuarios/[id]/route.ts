@@ -59,6 +59,13 @@ export async function PATCH(request: Request, context: RouteContext) {
   const adminCheck = await getAdminUser(request);
   if (adminCheck.error) return adminCheck.error;
 
+  const clients = getSupabaseClients();
+  if (!clients) {
+    return NextResponse.json({ error: 'Supabase environment variables are not configured.' }, { status: 500 });
+  }
+
+  const { supabaseAdmin } = clients;
+
   const body = await request.json();
   const nombreCompleto = String(body.nombre_completo || '').trim();
   const rol = body.rol === 'admin' ? 'admin' : 'user';
@@ -98,6 +105,13 @@ export async function PATCH(request: Request, context: RouteContext) {
 export async function DELETE(request: Request, context: RouteContext) {
   const adminCheck = await getAdminUser(request);
   if (adminCheck.error) return adminCheck.error;
+
+  const clients = getSupabaseClients();
+  if (!clients) {
+    return NextResponse.json({ error: 'Supabase environment variables are not configured.' }, { status: 500 });
+  }
+
+  const { supabaseAdmin } = clients;
 
   const { id: targetId } = await context.params;
   if (!isValidUuid(targetId)) {
