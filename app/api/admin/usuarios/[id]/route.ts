@@ -9,17 +9,27 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
-  throw new Error('Supabase environment variables are not configured.');
-}
+const getSupabaseClients = () => {
+  if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
+    return null;
+  }
 
-const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+  return {
+    supabaseAuth: createClient(supabaseUrl, supabaseAnonKey),
+    supabaseAdmin: createClient(supabaseUrl, supabaseServiceKey),
+  };
+};
 
 const isValidUuid = (value: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 const getAdminUser = async (request: Request) => {
+  const clients = getSupabaseClients();
+  if (!clients) {
+    return { error: NextResponse.json({ error: 'Supabase environment variables are not configured.' }, { status: 500 }) };
+  }
+
+  const { supabaseAuth, supabaseAdmin } = clients;
   const authHeader = request.headers.get('authorization') || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
 
