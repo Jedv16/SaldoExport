@@ -28,7 +28,10 @@ export default function Register() {
     });
 
     if (error) {
-      setErrorMessage(error.message);
+      const friendlyMessage = error.message.includes('Password should contain at least one character of each')
+        ? 'Debe de incluir una letra mayuscula, minuscula, numeros y simbolos.'
+        : error.message;
+      setErrorMessage(friendlyMessage);
       setLoading(false);
       return;
     }

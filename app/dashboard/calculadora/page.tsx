@@ -18,7 +18,10 @@ export default function CalculadoraPage() {
     { concepto: '', monto: 0 }
   ]);
   const [mesTrabajo, setMesTrabajo] = useState(new Date().getMonth() + 1);
+  const currentYear = new Date().getFullYear();
+  const [anioTrabajo, setAnioTrabajo] = useState(currentYear);
   const [mesesTrabajados, setMesesTrabajados] = useState<number[]>([]);
+  const [anioBaseEmpresa, setAnioBaseEmpresa] = useState<number | null>(null);
   const [saldoArrastreTotalPrevio, setSaldoArrastreTotalPrevio] = useState(0);
 
   const monthNames = [
@@ -35,14 +38,14 @@ export default function CalculadoraPage() {
     'noviembre',
     'diciembre'
   ];
-  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: currentYear - 1900 + 1 }, (_, i) => currentYear - i);
 
   const formatMoney = (value?: number) => {
     if (typeof value !== 'number' || Number.isNaN(value)) return '0.00';
     return value.toFixed(2);
   };
 
-  const periodoLabel = `${monthNames[mesTrabajo - 1]} ${currentYear}`;
+  const periodoLabel = `${monthNames[mesTrabajo - 1]} ${anioTrabajo}`;
 
   const totalAdquisiciones = adquisiciones.reduce((acc, item) => acc + (Number(item.monto) || 0), 0);
   const totalAdquisicionesIgv = totalAdquisiciones * 0.18;
@@ -99,13 +102,39 @@ export default function CalculadoraPage() {
         .from('periodos_fiscales')
         .select('mes')
         .eq('empresa_id', empresaId)
-        .eq('anio', currentYear);
+        .eq('anio', anioTrabajo);
 
       if (data) setMesesTrabajados(data.map((row) => row.mes));
     };
 
     fetchMeses();
-  }, [empresaId, currentYear]);
+  }, [empresaId, anioTrabajo]);
+
+  useEffect(() => {
+    const fetchAnioBaseEmpresa = async () => {
+      if (!empresaId) {
+        setAnioBaseEmpresa(null);
+        return;
+      }
+
+      const { data } = await supabase
+        .from('periodos_fiscales')
+        .select('anio')
+        .eq('empresa_id', empresaId)
+        .order('anio', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (data?.anio) {
+        setAnioBaseEmpresa(data.anio);
+      } else {
+        // Si no hay historial, el ciclo inicia en el año que el usuario seleccione.
+        setAnioBaseEmpresa(anioTrabajo);
+      }
+    };
+
+    fetchAnioBaseEmpresa();
+  }, [empresaId, anioTrabajo]);
 
 
   useEffect(() => {
@@ -115,44 +144,40 @@ export default function CalculadoraPage() {
         return;
       }
 
-      // Lógica de ciclo de 4 años: el arrastre se borra cada 4 años
-      // Año base 2026: ciclos en 2026-2030, 2031-2035, etc.
-      const yearsSince2026 = currentYear - 2026;
-      const cycleYear = yearsSince2026 % 4;
-      
-      // Si es el primer año del ciclo (cycleYear === 0 en años 2026, 2030, 2034, etc.),
-      // buscar arrastre del año anterior. Si no es el primer año, ignorar.
-      if (cycleYear === 0 && mesTrabajo === 1) {
-        // Primer mes del primer año del ciclo: no hay arrastre
+      const base = anioBaseEmpresa ?? anioTrabajo;
+      const esInicioDeNuevoCiclo = anioTrabajo > base && (anioTrabajo - base) % 4 === 0;
+
+      if (esInicioDeNuevoCiclo && mesTrabajo === 1) {
+        // Reinicio de ciclo (cada 4 años desde el año base de esa empresa).
         setSaldoArrastreTotalPrevio(0);
         return;
       }
 
-      if (cycleYear === 0 && mesTrabajo > 1) {
-        // Mes posterior al primero en año de inicio de ciclo: buscar en el mismo año
+      if (mesTrabajo > 1) {
+        // Buscar el último mes guardado dentro del mismo año de trabajo.
         const { data } = await supabase
           .from('periodos_fiscales')
           .select('mes, calculos_resultados ( saldo_arrastrable )')
           .eq('empresa_id', empresaId)
-          .eq('anio', currentYear)
+          .eq('anio', anioTrabajo)
           .lt('mes', mesTrabajo)
           .order('mes', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
         const arrastre = data?.calculos_resultados?.[0]?.saldo_arrastrable ?? 0;
         setSaldoArrastreTotalPrevio(arrastre);
       } else {
-        // Otros años dentro del ciclo: arrastrar normalmente
+        // Enero: tomar último arrastre del año anterior, salvo inicio de ciclo.
         const { data } = await supabase
           .from('periodos_fiscales')
-          .select('mes, calculos_resultados ( saldo_arrastrable )')
+          .select('anio, mes, calculos_resultados ( saldo_arrastrable )')
           .eq('empresa_id', empresaId)
-          .eq('anio', currentYear)
-          .lt('mes', mesTrabajo)
+          .lt('anio', anioTrabajo)
+          .order('anio', { ascending: false })
           .order('mes', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
         const arrastre = data?.calculos_resultados?.[0]?.saldo_arrastrable ?? 0;
         setSaldoArrastreTotalPrevio(arrastre);
@@ -160,7 +185,7 @@ export default function CalculadoraPage() {
     };
 
     fetchArrastreTotal();
-  }, [empresaId, mesTrabajo, currentYear]);
+  }, [empresaId, mesTrabajo, anioTrabajo, anioBaseEmpresa]);
 
   useEffect(() => {
     if (mesesTrabajados.length === 0) return;
@@ -212,7 +237,7 @@ export default function CalculadoraPage() {
         empresa_id: emp.id,
         usuario_id: user?.id,
         mes: mesTrabajo,
-        anio: currentYear,
+        anio: anioTrabajo,
         // Guardar como solicitaste: compras = Total IGV adquisiciones (monto de IGV)
         compra_insumos_base: totalAdquisicionesIgv,
         venta_nacional_base: ventasBase,
@@ -245,7 +270,7 @@ export default function CalculadoraPage() {
           periodoId: periodo.id,
           empresaId: emp.id,
           mes: mesTrabajo,
-          anio: currentYear,
+          anio: anioTrabajo,
           adquisiciones,
         })
       );
@@ -261,6 +286,7 @@ export default function CalculadoraPage() {
     setExportFob(0);
     setAdquisiciones([{ concepto: '', monto: 0 }]);
     setMesTrabajo(new Date().getMonth() + 1);
+    setAnioTrabajo(currentYear);
 
   } catch (error: any) {
     console.error(error);
@@ -380,10 +406,21 @@ export default function CalculadoraPage() {
                     const trabajado = mesesTrabajados.includes(monthIndex);
                     return (
                       <option key={month} value={monthIndex} disabled={trabajado}>
-                        {month} {currentYear} {trabajado ? '(completado)' : ''}
+                        {month} {trabajado ? '(completado)' : ''}
                       </option>
                     );
                   })}
+                </select>
+                <select
+                  value={anioTrabajo}
+                  onChange={(e) => setAnioTrabajo(Number(e.target.value))}
+                  className="bg-[#f5f7fb] border border-[#e2e7f0] rounded-2xl px-4 py-2 text-sm font-bold text-[#0b1f3a]"
+                >
+                  {yearOptions.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -492,7 +529,7 @@ export default function CalculadoraPage() {
                 </div>
               </div>
               <div className="space-y-3">
-                <label className="text-[10px] font-black text-[#6c7690] uppercase ml-1">Ventas nacionales</label>
+                <label className="text-[10px] font-black text-[#6c7690] uppercase ml-1">Ventas nacionales (Valor Venta)</label>
                 <input
                   type="number"
                   inputMode="decimal"
@@ -532,7 +569,7 @@ export default function CalculadoraPage() {
         <div className="space-y-6 lg:sticky lg:top-6 h-fit">
           <div className="bg-gradient-to-br from-[#0b1f3a] via-[#12305a] to-[#1a3d73] text-white p-8 rounded-[2.5rem] shadow-2xl shadow-[#0b1f3a]/30">
             <h3 className="text-white/70 text-[10px] font-black uppercase tracking-widest mb-3">Monto a devolver</h3>
-            <p className="text-5xl md:text-6xl font-black mb-6 tracking-tight text-emerald-300">S/ {formatMoney(limiteManual)}</p>
+            <p className="text-5xl md:text-5xl font-black mb-6 tracking-tight text-emerald-300">S/ {formatMoney(limiteManual)}</p>
 
             <div className="space-y-4 text-xs border-t border-white/20 pt-6">
               <div className="flex justify-between font-bold">
@@ -603,10 +640,6 @@ export default function CalculadoraPage() {
               <span className="text-[#0b1f3a] font-black text-xs">Automatico</span>
             </div>
             <div className="mt-4 space-y-3 text-[11px] font-bold text-[#6c7690]">
-              <div className="flex items-center justify-between">
-                <span>Arrastre total periodos</span>
-                <span>S/ {formatMoney(saldoArrastreTotal)}</span>
-              </div>
               <div className="flex items-center justify-between">
                 <span>Credito fiscal</span>
                 <span>S/ {formatMoney(creditoFiscal)}</span>
